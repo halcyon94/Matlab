@@ -1,7 +1,7 @@
 tot_bits_to_send = 10000000; %num of bits to send
 M = 2;                     % Size of signal constellation
 k = log2(M);                % Number of bits per symbol
-nSym=10000;                 % Number of symbols 
+nSym=1000;                 % Number of symbols 
 n = nSym*k;                  % Number of bits to process and the num of bits to send at once
 numSamplesPerSymbol = 1;    % Oversampling factor
 rng default                 % Use default random number generator
@@ -10,42 +10,52 @@ lenSNR = length(SNR_Vec);
 ber = zeros(1, lenSNR);
 coderate = 1/2; % Convolutonal Coding Rate
 trellis = poly2trellis([5 4],[23 35 0; 0 5 13]); % Trellis
-trainlen;
+trben = 3; %trace back length
+berCumulative = ber;
+
 num_of_iter = tot_bits_to_send*numSamplesPerSymbol/n;
-%eqrls = lineareq(10, rls(0.99,0.3)); % Create an RLS equalizer object.
-%eqrls.SigConst = qammod(0:M-1,M); % Set signal constellation.
-%eqrls.ResetBeforeFiltering = 0; % Maintain continuity between iterations.
-eqlms = lineareq(8, lms(0.003)); % Create an LMS equalizer object with 6 weights and step size of .003
-eqlms.SigConst = qammod(0:M-1,M); % Set signal constellation.
-eqlms.ResetBeforeFiltering = 0; % Maintain continuity between iterations.
+eqrls = lineareq(6, rls(0.99,0.3)); % Create an RLS equalizer object.
+eqrls.SigConst = qammod(0:M-1,M); % Set signal constellation.
+eqrls.ResetBeforeFiltering = 0; % Maintain continuity between iterations.
+%eqlms = lineareq(8, lms(0.003)); % Create an LMS equalizer object with 6 weights and step size of .003
+%eqlms.SigConst = qammod(0:M-1,M); % Set signal constellation.
+%eqlms.ResetBeforeFiltering = 0; % Maintain continuity between iterations.
 %eq_current = eqrls;
 
 %chan = 1;          % No channel
 chan = [1 .2 .4]; % Somewhat invertible channel impulse response, Moderate ISI
 %chan = [0.227 0.460 0.688 0.460 0.227]';   % Not so invertible, severe ISI
-for z=1:50
-    dataIn = randi([0 1],n*coderate,1);  % Generate vector of binary data
-    dataIn_con=convenc(dataIn,trellis);
-    dataInMatrix = reshape(dataIn_con,k,length(dataIn_con)/k);   % Reshape data into binary 4-tuples
-    dataSymbolsIn = bi2de((dataInMatrix).','left-msb');                 % Convert to integers
+iterations = 10;
+for z=1:iterations   %num iter
+    dataIn = randi([0 1],nSym,k);  % Generate vector of binary data
+    %dataIn = randi([0 1],n*coderate,1);  % Generate vector of binary data
+    %dataInMatrix = reshape(dataIn,k,length(dataIn_con)/k);   % Reshape data into binary 4-tuples
+    %dataInMatrix = reshape(dataIn,n,1);   % Reshape data into binary 4-tuples
+    dataIn_con=convenc(reshape(dataIn,nSym*k, 1),trellis);
+    n = length(dataIn_con);
+    dataSymbolsIn = bi2de(reshape(dataIn_con, n/k, k),'left-msb');                 % Convert to integers
     dataMod = qammod(dataSymbolsIn,M,0,'gray');         % Binary coding, phase offset = 0
     if isequal(chan,1)
         dataMod_chan = dataMod;
     else
         dataMod_chan = filter(chan,1,dataMod);  % Apply the channel.
     end
-for j = 1:lenSNR % one iteration of the simulation at each SNR Value
-    receivedSignal = awgn(dataMod_chan,SNR_Vec(j)+ 10*log10(k*coderate) - 10*log10(numSamplesPerSymbol),'measured');
-    s = equalize(eqlms,receivedSignal,dataMod(1:50));
-    dataSymbolsOut = qamdemod(receivedSignal,M,0,'gray');
-    dataOutMatrix = de2bi(dataSymbolsOut,k);
-    dataOutMatrix=reshape(dataOutMatrix.',numel(dataOutMatrix),1);
-    dataOut = vitdec(dataOutMatrix,trellis,16,'cont','hard');
-    %dataOut = dataOutMatrix(:);                   % Return data in column vector
-    [numErrors,ber(j)] = biterr(dataIn,dataOut);
-end % End SNR iteration
+    for j = 1:lenSNR % one iteration of the simulation at each SNR Value
+        %receivedSignal = awgn(dataMod_chan,SNR_Vec(j)+ 10*log10(k*coderate) - 10*log10(numSamplesPerSymbol),'measured');
+        receivedSignal = awgn(dataMod_chan,SNR_Vec(j)+10*log10(k),'measured');
+        s = equalize(eqrls,receivedSignal,dataMod(1:50));
+        dataSymbolsOut = qamdemod(s,M,0,'gray');
+        dataOutMatrix = de2bi(dataSymbolsOut',k);
+        dataOutMatrix=reshape(dataOutMatrix.',numel(dataOutMatrix),1);
+        dataOut = vitdec(dataOutMatrix,trellis,trben,'cont','hard');
+        %dataOut = dataOutMatrix(:);                   % Return data in column vector
+        [numErrors,ber(j)] = biterr(dataIn(1:end-(2*trben)),dataOut(2*trben+1:end));
+    end % End SNR iteration
+    berCumulative = berCumulative + ber;
 end
-semilogy(SNR_Vec, ber,'*')
+berCumulative = berCumulative / iterations;
+figure;
+semilogy(SNR_Vec, berCumulative,'*')
 
 % Compute the theoretical BER for this scenario
 if isequal(M,2)
