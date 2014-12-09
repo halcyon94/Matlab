@@ -21,7 +21,7 @@ tonecoeff = feedback1;
 %% I don't recommend touching the code below
 % Generate a carrier
 carrier = fskmod(tonecoeff*ones(1,1024),M,fsep,nsamp,Fs);
-rx = sig.*conj(carrier);
+rx = sig.*conj(carrier).*gain;
 rx = intdump(rx,nsamp);
 %% Recover your signal here
 
